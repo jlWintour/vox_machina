@@ -120,7 +120,7 @@ enum fm {OFF, SLOW, FAST, FADE, ON} led_flashmode;
 
 const unsigned int EEPROM_ADDR_FLASHMODE       = 0;
 const unsigned int EEPROM_ADDR_BRIGHTNESS      = EEPROM_ADDR_FLASHMODE  + sizeof(led_flashmode);
-const unsigned int EEPROM_ADDR_NEXT_AVAILABLE  = EEPROM_ADDR_BRIGHTNESS + sizeof(led_brightness);
+const unsigned int EEPROM_ADDR_NEXT_AVAILABLE  = EEPROM_ADDR_BRIGHTNESS + sizeof(led_brightness); 
 
 
 //-------[ Durations and Intervals ]--------
@@ -145,7 +145,8 @@ const unsigned int POT_TOP_1    = 0x3f0;
 const unsigned int SLIDER_FILTER_TIME = 5;
 
 unsigned int pot_value;
-unsigned int pot_filter;
+unsigned int last_pot_value;
+unsigned int slider_filter[2];
 unsigned int slider_timer[2];
 uint8_t      slider_value[2];
 uint8_t      prev_slider_value[2];
@@ -275,7 +276,7 @@ void setup() {
   digitalWrite(SOFTPOT_PIN, HIGH);
 
   // Debug port
-  if (true) {
+  if (DEBUG) {
     Serial.begin(57600); 
     while (!Serial) {
     }
@@ -354,12 +355,14 @@ void loop(){
     if( false ) {
       Serial.print("Pot_value = ");
       Serial.print(pot_value, HEX);
-      Serial.print(", pot_filter = ");
-      Serial.print(pot_filter, HEX);
-      Serial.print(", Slider 0 = ");
+      Serial.print(", Slider_filter[0] = ");
+      Serial.print(slider_filter[0], HEX);
+      Serial.print(", Slider[0] = ");
       Serial.print(slider_value[0], HEX);
-      Serial.print(", Slider 1 = ");
-      Serial.println(slider_value[1], HEX);
+      Serial.print(", Slider Filter[1] = ");
+     Serial.println(slider_filter[1], HEX);
+       Serial.print(", Slider[1] = ");
+     Serial.println(slider_value[1], HEX);
       delay(200);
     }
   }
@@ -541,38 +544,52 @@ void do_normal_mode() {
     // Sample Touchpad, and filter it. 
 
     pot_value = analogRead(SOFTPOT_PIN);
-    pot_filter = pot_value; // (pot_value + pot_filter)/2; 
 
-
-    // In order to affect a slider, the filtered pot value has to be inside 
+    // In order to affect a slider, the pot value has to be inside 
     // the Slider range until the the slider timer expires. Any sample outside 
     // the range restarts the timer.
+
+    // When the touch is removed from a touchpad, it has a tendancy to make an in-range positive 
+    // excursion that leave the slider value in an unintended position. To try and suppress these,
+    // we call a slider out of range whenever is makes a large postitive excursion.
+
+    if ((pot_value > last_pot_value) && (pot_value - last_pot_value > 40)) {
+      slider_timer[0] = SLIDER_FILTER_TIME; 
+      slider_timer[1] = SLIDER_FILTER_TIME; 
+    }
+    last_pot_value = pot_value;
     
     //--------[ Check range for Slider 0 ]-------- 
-    if ((pot_filter < POT_BOTTOM_0)||( pot_filter > POT_TOP_0)) {
+    if ((pot_value < POT_BOTTOM_0)||( pot_value > POT_TOP_0)) {
       // Not in slider 0 range
       slider_timer[0] = SLIDER_FILTER_TIME;
     } 
-    else if( slider_timer[0]) {
-      slider_timer[0]--;
-    } 
     else {
-      // Slider_timer[0] expired: Activate Slider[0]. 
-      slider_value[0] = map(pot_filter, POT_BOTTOM_0, POT_TOP_0, 0, 127);
+      slider_filter[0] = (pot_value + 3 * slider_filter[0])/4; 
+      if( slider_timer[0]) {
+        slider_timer[0]--;
+      } 
+      else {
+        // Slider_timer[0] expired: Activate Slider[0]. 
+        slider_value[0] = map(slider_filter[0], POT_BOTTOM_0, POT_TOP_0, 0, 127);
+      }
     }
 
 
     //--------[ Check against Slider 1 range ]--------
-    if ((pot_filter < POT_BOTTOM_1) || (pot_filter > POT_TOP_1)) {
+    if ((pot_value < POT_BOTTOM_1) || (pot_value > POT_TOP_1)) {
       // Not in Slider 1 range
       slider_timer[1] = SLIDER_FILTER_TIME;
     } 
-    else if (slider_timer[1]) {
-      slider_timer[1]--;
-    } 
     else {
-      // Slider_timer[1] expired: Activate Slider[1]
-      slider_value[1] = map(pot_filter, POT_BOTTOM_1, POT_TOP_1, 0, 127);
+      slider_filter[1] = (pot_value + 3 * slider_filter[1])/4;
+      if (slider_timer[1]) {
+        slider_timer[1]--;
+      } 
+      else {
+        // Slider_timer[1] expired: Activate Slider[1]
+        slider_value[1] = map(slider_filter[1], POT_BOTTOM_1, POT_TOP_1, 0, 127);
+      }
     }
 
     // If the Control Change Timer has expired, look for control changes
